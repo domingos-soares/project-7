@@ -2,18 +2,20 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15-alpine
-    container_name: items_postgres
+    image: mysql:8.0
+    container_name: items_mysql
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: items_db
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: items_db
+      MYSQL_USER: items_user
+      MYSQL_PASSWORD: items_pass
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,7 +38,7 @@ services:
     build: .
     container_name: items_api
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/items_db
+      DATABASE_URL: mysql+aiomysql://items_user:items_pass@db:3306/items_db
       REDIS_URL: redis://redis:6379/0
       CACHE_TTL: 300
     ports:
@@ -51,5 +53,5 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
-  postgres_data:
+  mysql_data:
   redis_data:

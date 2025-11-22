@@ -1,12 +1,13 @@
-# Items API with PostgreSQL
+# Items API with PostgreSQL/MySQL
 
-FastAPI REST service for managing items with PostgreSQL database support.
+FastAPI REST service for managing items with PostgreSQL or MySQL database support.
 
 ## Features
 
 - **CRUD operations** for items (Create, Read, Update, Delete)
 - **UUID-based identification** for each item
-- **PostgreSQL database** with SQLAlchemy async ORM
+- **Multiple database support**: PostgreSQL or MySQL with SQLAlchemy async ORM
+- **Redis caching** for improved read performance
 - **Auto-generated API docs** at `/docs`
 - **Health check endpoint** for monitoring
 - **Docker support** for easy deployment
@@ -20,7 +21,7 @@ FastAPI REST service for managing items with PostgreSQL database support.
 
 ### Option 2: Local Development
 - Python 3.10+
-- PostgreSQL 12+
+- PostgreSQL 12+ OR MySQL 8.0+
 
 ## Setup
 
@@ -28,15 +29,29 @@ FastAPI REST service for managing items with PostgreSQL database support.
 
 The easiest way to run the application is using Docker Compose:
 
+**With PostgreSQL (default):**
 ```bash
 # Build and start all services (API + PostgreSQL)
 docker-compose up --build
 
 # Or run in detached mode
 docker-compose up -d
+```
 
-# Stop services
-docker-compose down
+**With MySQL:**
+```bash
+# Build and start all services (API + MySQL)
+docker-compose -f docker-compose.mysql.yml up --build
+
+# Or run in detached mode
+docker-compose -f docker-compose.mysql.yml up -d
+```
+
+**Stop services:**
+```bash
+docker-compose down              # PostgreSQL
+# OR
+docker-compose -f docker-compose.mysql.yml down   # MySQL
 
 # Stop and remove volumes (clears database)
 docker-compose down -v
@@ -46,14 +61,15 @@ The API will be available at `http://localhost:8000`
 
 **Docker Services:**
 - **API**: FastAPI application (port 8000)
-- **Database**: PostgreSQL 15 (port 5432)
-- **Volume**: Persistent storage for database data
+- **Database**: PostgreSQL 15 (port 5432) OR MySQL 8.0 (port 3306)
+- **Redis**: Cache server (port 6379)
+- **Volumes**: Persistent storage for database and cache data
 
 ### Option B: Local Development Setup
 
-### 1. Install PostgreSQL
+### 1. Install Database
 
-If you don't have PostgreSQL installed:
+**Option 1: PostgreSQL**
 
 ```bash
 # macOS (using Homebrew)
@@ -64,7 +80,33 @@ brew services start postgresql@15
 createdb items_db
 ```
 
-### 2. Install Dependencies
+**Option 2: MySQL**
+
+```bash
+# macOS (using Homebrew)
+brew install mysql
+brew services start mysql
+
+# Create the database and user
+mysql -u root -e "CREATE DATABASE items_db;"
+mysql -u root -e "CREATE USER 'items_user'@'localhost' IDENTIFIED BY 'items_pass';"
+mysql -u root -e "GRANT ALL PRIVILEGES ON items_db.* TO 'items_user'@'localhost';"
+mysql -u root -e "FLUSH PRIVILEGES;"
+```
+
+### 2. Install Redis
+
+```bash
+# macOS (using Homebrew)
+brew install redis
+brew services start redis
+
+# Verify Redis is running
+redis-cli ping
+# Should return: PONG
+```
+
+### 3. Install Dependencies
 
 ```bash
 # Create virtual environment
@@ -75,22 +117,32 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure Database
+### 4. Configure Environment
 
-Copy `.env.example` to `.env` and update if needed:
+Copy `.env.example` to `.env` and update the configuration:
 
 ```bash
 cp .env.example .env
 ```
 
-Default connection string:
+**Database URL - For PostgreSQL:**
 ```
 DATABASE_URL=postgresql+asyncpg://domingossoares@localhost:5432/items_db
 ```
-
 **Note**: On macOS with Homebrew PostgreSQL, use your system username (no password needed for local connections).
 
-### 4. Run the Server
+**Database URL - For MySQL:**
+```
+DATABASE_URL=mysql+aiomysql://items_user:items_pass@localhost:3306/items_db
+```
+
+**Redis Configuration:**
+```
+REDIS_URL=redis://localhost:6379/0
+CACHE_TTL=300
+```
+
+### 5. Run the Server
 
 ```bash
 ./venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -98,10 +150,28 @@ DATABASE_URL=postgresql+asyncpg://domingossoares@localhost:5432/items_db
 
 The API will be available at: `http://localhost:8000`
 
+## Caching Behavior
+
+The API uses Redis for caching to improve read performance:
+
+- **Cached Endpoints**:
+  - `GET /items` - All items list (cached for 5 minutes by default)
+  - `GET /items/{uuid}` - Individual item (cached for 5 minutes by default)
+
+- **Cache Invalidation**:
+  - Cache is automatically invalidated on write operations:
+    - `POST /items` - Clears all items list cache
+    - `PUT /items/{uuid}` - Clears specific item and all items list cache
+    - `DELETE /items/{uuid}` - Clears specific item and all items list cache
+
+- **Cache TTL**: Configurable via `CACHE_TTL` environment variable (default: 300 seconds)
+
+- **Graceful Degradation**: If Redis is unavailable, the API continues to work by querying the database directly
+
 ## API Endpoints
 
 ### GET `/items`
-List all items.
+List all items (cached).
 
 ### GET `/items/{uuid}`
 Get a specific item by UUID.
@@ -208,16 +278,18 @@ curl -X DELETE "http://localhost:8000/items/{uuid}"
 
 ```
 project-7/
-├── main.py              # FastAPI application and routes
-├── database.py          # Database connection and session management
-├── models.py            # SQLAlchemy ORM models
-├── requirements.txt     # Python dependencies
-├── Dockerfile           # Docker image configuration
-├── docker-compose.yml   # Docker services orchestration
-├── Makefile            # Convenient commands for Docker
-├── .env.example        # Example environment variables
-├── .dockerignore       # Files to exclude from Docker build
-└── README.md           # This file
+├── main.py                    # FastAPI application and routes
+├── database.py                # Database connection and session management
+├── models.py                  # SQLAlchemy ORM models (PostgreSQL/MySQL compatible)
+├── cache.py                   # Redis caching utilities
+├── requirements.txt           # Python dependencies
+├── Dockerfile                 # Docker image configuration
+├── docker-compose.yml         # Docker services (PostgreSQL + Redis)
+├── docker-compose.mysql.yml   # Docker services (MySQL + Redis)
+├── Makefile                   # Convenient commands for Docker
+├── .env.example              # Example environment variables
+├── .dockerignore             # Files to exclude from Docker build
+└── README.md                 # This file
 ```
 
 ## Database Schema
@@ -226,8 +298,10 @@ project-7/
 
 | Column      | Type    | Description              |
 |-------------|---------|--------------------------|
-| id          | UUID    | Primary key (auto)       |
+| id          | UUID*   | Primary key (auto)       |
 | name        | String  | Item name (required)     |
 | description | Text    | Item description (optional) |
 | price       | Float   | Item price (required)    |
 | in_stock    | Boolean | Stock status (default: true) |
+
+**Note**: UUID is stored natively in PostgreSQL and as CHAR(36) in MySQL, but the API handles UUIDs transparently regardless of the database backend.

@@ -3,14 +3,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import declarative_base
 
 # Database URL - use environment variable or default to local postgres
-# On macOS Homebrew, use current user without password (peer authentication)
+# Supported databases:
+# - PostgreSQL: postgresql+asyncpg://user:pass@host:port/db
+# - MySQL: mysql+aiomysql://user:pass@host:port/db
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://domingossoares@localhost:5432/items_db"
 )
 
-# Create async engine
-engine = create_async_engine(DATABASE_URL, echo=True)
+# Create async engine with appropriate settings
+# MySQL requires different pool settings
+engine_args = {"echo": True}
+if "mysql" in DATABASE_URL:
+    engine_args["pool_pre_ping"] = True
+    engine_args["pool_recycle"] = 3600
+
+engine = create_async_engine(DATABASE_URL, **engine_args)
 
 # Create async session factory
 async_session_maker = async_sessionmaker(

@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, init_db
 from models import ItemModel
+from cache import get_cache, set_cache, delete_cache, delete_cache_pattern, close_redis
 
 
 app = FastAPI(title="Items API")
@@ -15,8 +17,14 @@ app = FastAPI(title="Items API")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """Initialize database and Redis on startup"""
     await init_db()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close Redis connection on shutdown"""
+    await close_redis()
 
 
 class ItemCreate(BaseModel):
@@ -59,10 +67,19 @@ async def healthcheck(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
 
 @app.get("/items")
 async def list_items(db: AsyncSession = Depends(get_db)) -> List[ItemResponse]:
-    """Get all items from database"""
+    """Get all items from database (cached)"""
+    # Try to get from cache
+    cache_key = "items:all"
+    cached_data = await get_cache(cache_key)
+    
+    if cached_data:
+        items_data = json.loads(cached_data)
+        return [ItemResponse(**item) for item in items_data]
+    
+    # If not in cache, fetch from database
     result = await db.execute(select(ItemModel))
     items = result.scalars().all()
-    return [
+    response = [
         ItemResponse(
             id=str(item.id),
             name=item.name,
@@ -72,29 +89,47 @@ async def list_items(db: AsyncSession = Depends(get_db)) -> List[ItemResponse]:
         )
         for item in items
     ]
+    
+    # Cache the result
+    await set_cache(cache_key, json.dumps([item.dict() for item in response]))
+    
+    return response
 
 
 @app.get("/items/{item_id}")
 async def get_item(item_id: str, db: AsyncSession = Depends(get_db)) -> ItemResponse:
-    """Get a specific item by UUID"""
+    """Get a specific item by UUID (cached)"""
     try:
         item_uuid = uuid.UUID(item_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid UUID format")
     
+    # Try to get from cache
+    cache_key = f"items:{item_id}"
+    cached_data = await get_cache(cache_key)
+    
+    if cached_data:
+        return ItemResponse(**json.loads(cached_data))
+    
+    # If not in cache, fetch from database
     result = await db.execute(select(ItemModel).where(ItemModel.id == item_uuid))
     item = result.scalar_one_or_none()
     
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    return ItemResponse(
+    response = ItemResponse(
         id=str(item.id),
         name=item.name,
         description=item.description,
         price=item.price,
         in_stock=item.in_stock
     )
+    
+    # Cache the result
+    await set_cache(cache_key, json.dumps(response.dict()))
+    
+    return response
 
 
 @app.post("/items", status_code=201)
@@ -125,6 +160,9 @@ async def create_item(item: ItemCreate, db: AsyncSession = Depends(get_db)) -> I
     db.add(db_item)
     await db.commit()
     await db.refresh(db_item)
+    
+    # Invalidate cache
+    await delete_cache("items:all")
     
     return ItemResponse(
         id=str(db_item.id),
@@ -157,6 +195,10 @@ async def update_item(item_id: str, item: ItemCreate, db: AsyncSession = Depends
     await db.commit()
     await db.refresh(db_item)
     
+    # Invalidate cache
+    await delete_cache(f"items:{item_id}")
+    await delete_cache("items:all")
+    
     return ItemResponse(
         id=str(db_item.id),
         name=db_item.name,
@@ -182,5 +224,9 @@ async def delete_item(item_id: str, db: AsyncSession = Depends(get_db)) -> Dict[
     
     await db.delete(db_item)
     await db.commit()
+    
+    # Invalidate cache
+    await delete_cache(f"items:{item_id}")
+    await delete_cache("items:all")
     
     return {"detail": "Item deleted"}
