@@ -11,10 +11,42 @@ FastAPI REST service for managing items with PostgreSQL database support.
 
 ## Prerequisites
 
+### Option 1: Docker (Recommended)
+- Docker
+- Docker Compose
+
+### Option 2: Local Development
 - Python 3.10+
 - PostgreSQL 12+
 
 ## Setup
+
+### Option A: Docker Setup (Recommended)
+
+The easiest way to run the application is using Docker Compose:
+
+```bash
+# Build and start all services (API + PostgreSQL)
+docker-compose up --build
+
+# Or run in detached mode
+docker-compose up -d
+
+# Stop services
+docker-compose down
+
+# Stop and remove volumes (clears database)
+docker-compose down -v
+```
+
+The API will be available at `http://localhost:8000`
+
+**Docker Services:**
+- **API**: FastAPI application (port 8000)
+- **Database**: PostgreSQL 15 (port 5432)
+- **Volume**: Persistent storage for database data
+
+### Option B: Local Development Setup
 
 ### 1. Install PostgreSQL
 
